@@ -1,5 +1,5 @@
 ---
-title: "BrainStation Assignment"
+title: "Kickstarter Campaign Analysis"
 author: "Timothy Hister"
 date: today
 format: 
