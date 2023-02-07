@@ -1,0 +1,232 @@
+---
+title: "BrainStation Assignment"
+author: "Timothy Hister"
+date: today
+format: 
+  pdf:
+    fig-height: 3.5
+    fig-width: 8
+    fontsize: 10pt
+editor: visual
+execute: 
+  echo: false
+  warning: false
+  cache: true
+editor_options: 
+  chunk_output_type: console
+geometry:
+  - left=1.9cm
+  - right=1.9cm
+  - top=1.9cm
+  - bottom=1.9cm
+  - footskip=.7cm
+---
+
+```{r setup}
+#| results: false
+#| include: false
+
+pacman::p_load(tidyverse, lubridate)
+ggplot2::theme_set(ggthemes::theme_clean(base_size = 10))
+
+campaign = read_csv2("campaign.csv")
+campaign = campaign %>%
+  mutate(across(c(ends_with("id"), "backers"), as.integer)) %>%
+  mutate(across(c("goal", "pledged"), as.double)) %>%
+  mutate(goal = goal / 10) %>% # goal is messed up!!!!
+  mutate(across(c("launched", "deadline"), ymd))
+
+joined = read_csv2("joined.csv")
+joined = joined %>%
+  mutate(across(c(ends_with("id"), "backers"), as.integer)) %>%
+  mutate(across(c("goal", "pledged"), as.double)) %>%
+  mutate(across(c("launched", "deadline"), ymd))
+
+saveRDS(campaign, "campaign.Rds")
+saveRDS(joined, "joined.Rds")
+```
+
+Introduction
+--------
+
+The purpose of this report is to provide recommendations to a small board game company that is planning to fund its first Kickstarter campaign. A data set has been provided that contains information on previous Kickstarter campaigns. Specifically, the data set has campaign-level information that includes the company name, industry, country, currency, launch date, deadline, the campaign finance *goal*, the number of *backers*, the amount of money that was *pledged*, and the ultimate *outcome* of the campaign. The set of values of the *outcome* variable are "failed", "successful", "canceled", "suspended", "undefined", and "live"---note that all outcomes other than "successful" will be collectively considered as "unsuccessful" throughout this report.
+
+Assumptions
+--------
+
+There are a number of assumptions that have been made in this report. First, since it was not explicitly stated in the instructions, this analysis will assume that the boardgame company is located in the United States.
+
+Second, it is not entirely clear from the data set whether monetary values (such as *goal*) are given in the same currency (presumably USD), or in the currency of the country where the campaign occurred. Making a proper determination requires knowledge of national economies that is beyond the scope of this paper; as such, for simplicity, this report will assume that all monetary variables have been given in USD and do not require conversion.
+
+Third, it is important to note the company is described as a "board game" company, yet "board games" is not one of the sub-categories in the data set. The closest term that in the data set is "tabletop games"---as such, this report assumes that "board games" and "tabletop games" are synonymous.
+
+Fourth, there are some major outliers in the data. This can be seen easily in @fig-box, which presents boxplots for three variables that have many outliers, *backers*, *goal*, and *pledged*. Without better context on the data collection process, this report will assume that some of the most extreme outliers are errors, and will therefore be removed from the data set. In that light, we will remove all campaigns with either a financing goal equal to or over \$10 trillion or where the number of backers equals or is larger than 10,000. (This results in the removal of a six campaigns in total.)
+
+Finally, note that one country has the nonstandard value of "N,0\*." It is assumed that campaigns with this country value are from an unknown country.
+
+```{r}
+#| label: fig-box
+#| fig-cap: "Boxplots of *backers*, *goal*, and *pledged*."
+campaign %>%
+  select(goal, pledged, backers) %>%
+  mutate(`goal ($M)` = goal / 10^6) %>%
+  mutate(`pledged ($M)` = pledged / 10^6) %>%
+  select(-c(goal, pledged)) %>%
+  pivot_longer(cols=1:3) %>%
+  ggplot(aes(y=value, color=name)) +
+  geom_boxplot(alpha=.3) +
+  facet_wrap(~name, scales = 'free_y') + 
+  labs(y=NULL, color=NULL) + 
+  theme(legend.position = 'none') + 
+  scale_y_continuous(labels=scales::comma) + 
+  scale_color_viridis_d() +
+  ggtitle("There are many outliers for backers, finance goal, and amount pledged.")
+```
+
+Preliminary Analysis
+--------
+
+The resultant data set has a total of 14,994 rows and features campaigns that were launched between May 2009 to January 2018. Most companies only launch one campaign in the data set; however, four companies launched two campaigns. @fig-ts plots the time series for the number of campaigns, and shows that the number of campaigns grew between 2009 and 2018 and peaked around 2015 (especially for failed campaigns).
+
+For successful campaigns, the average financing goal was \$9,556.82; whereas for unsuccessful campaigns (defined above) the average financing goal was \$55,146.13. This suggests a relatively large difference between the goals of the successful and successful campaigns: successful campaigns had a goal that was around 17% of unsuccessful ones. For companies in the United States, successful campaign goals were around 26% of unsuccessful ones (averages of \$9752.68 and \$37292.09, respectively).
+
+The three categories with the most backers are Games (411,671), Design (262,245), and Technology (223,894). Meanwhile, the three categories with the fewest backers are Crafts (10,418), Journalism (6,202), and Dance (6,022). The three subcategories in the Games category with the most backers are Tabletop Games (247,120), Playing Cards (15,511), and Video Games (141,052). The three subcategories in the Games category with the fewest backers are Mobile Games (580), Puzzles (469), and Gaming Hardware (506).
+
+The three categories with the largest pledges are Games (\$27,792,570), Design (\$24,006,972), and Technology (\$22,626,491). Meanwhile, the three categories with the fewest backers are Crafts (\$574,123), Dance (\$488,336), and Journalism (\$451,963). The three subcategories in the Games category with the most backers are Tabletop Games (\$18,827,697), Video Games (\$781,1751), and Playing Cards (\$676,872). The three subcategories in the Games category with the fewest backers are Live Games (\$34,547), Mobile Games (\$19,533), and Puzzles (\$17,460).
+
+```{r}
+#| label: fig-ts
+#| fig-cap: "Number of Launched Kickstarter Campaigns Over Time by Outcome"
+
+
+joined %>%
+  mutate(month = zoo::as.yearmon(launched)) %>%
+  count(month, outcome) %>%
+  ggplot(aes(month, n, color=outcome)) + #, lty=outcome=='successful', shape=outcome=='successful')) + 
+  geom_line() + 
+  geom_point() + 
+  labs(y="# of launched campaigns", color=NULL, x='date') + 
+  theme(legend.position = 'top', legend.text=element_text(size=8)) + 
+  guides(color = guide_legend(nrow = 1)) + 
+  scale_y_continuous(labels=scales::comma) + 
+  theme(axis.text.x = element_text(angle = -45)) +
+  scale_color_viridis_d() +
+  ggtitle("Failed campaigns peaked around 2015")
+```
+
+```{=html}
+<!--
+In the United States, these are Games (328,306), Design (222,310), and Film & Video (205,116). In the United States, these are Dance (5,387), Journalism (5,699), and Crafts (9,516).
+-->
+```
+The most successful board game campaign (by both amount pledged and the number of backers) is "Gloomhaven (Second Printing)" and it was launched between 2017-04-04 and 2017-05-02 in the United States. Gloomhaven's finance goal was \$100,000, it was pledged \$3,999,795.77 and it received 40,642 backers. (Note that Gloomhaven is also the most successful campaign in all categories by amount pledged and second in number of  backers.) @fig-gloomhaven shows visually how certain board games compare on the amount pledged and number of backers dimensions.
+
+```{r}
+#| label: fig-gloomhaven
+#| fig-cap: "Scatterplot of Amount Pledged Versus Number of Backers for Board Games"
+
+joined %>%
+  filter(subcategory_id == 14) %>%
+  arrange(desc(pledged)) %>%
+  # re-code Gloomhaven
+  mutate(label = case_when(str_starts(name, "Gloomhaven") ~ "Gloomhaven", T ~ name)) %>%
+  ggplot(aes(backers, pledged,label=label)) + 
+  geom_point(alpha=.5, color=viridisLite::viridis(1)) +
+  ggrepel::geom_text_repel(color=viridisLite::viridis(1)) + 
+  theme(legend.position = 'top', legend.text=element_text(size=8)) + 
+  labs(x="# of backers", y="Amount Pledged", color=NULL) + 
+  scale_y_continuous(labels=scales::dollar) + 
+  scale_color_viridis_d() +
+  ggtitle("'Gloomhaven' was uniquely successful, both in terms of backers and amount pledged")
+```
+
+As @fig-bar shows, Switzerland, Austria and Hong Kong received the largest total amount pledged per campaign (these averages are \$20,666, \$204,66, and \$13,018, respectively). Meanwhile, the United States, Great Britain and Canada generated the most campaigns (11,643, 1,304 and 588 campaigns, respectively).
+
+```{r}
+#| label: fig-bar
+#| fig-cap: "The Top Five Countries for Average Amount Pledged per Campaign"
+#| 
+joined %>%
+  group_by(country) %>%
+  summarise(
+    avg_pledged = mean(pledged),
+    n = n()) %>%
+  arrange(avg_pledged, n) %>%
+  slice_tail(n=5) %>%
+  mutate(country = case_when(str_starts(country, 'N,0') ~ 'UNK', T ~ country)) %>%
+  mutate(country = forcats::as_factor(country)) %>%
+  pivot_longer(cols=2:3) %>%
+  filter(name != 'n') %>%
+  ggplot(aes(y=country, x=value, fill=country)) +
+  geom_col(position = 'dodge2') + 
+  scale_fill_viridis_d() + 
+  theme(legend.position = 'none') + 
+  scale_x_continuous(labels=scales::dollar) + 
+  labs(x="Average Amount Pledged per Campaign") + 
+  ggtitle("Switzerland (CH) and Austria (AT) average over $20,000 per Campaign")
+```
+
+```{r}
+#| include: false
+x = joined %>%
+  mutate(length = deadline - launched)
+
+cor(as.numeric(x$length), x$pledged)
+```
+
+Finally, campaign length appears to have an inverted-U shape relationship with the amount pledged. @fig-lm indicates that the campaigns that were pledged the most money generally lasted between around 20 and 60 days.
+
+
+```{r}
+#| label: fig-lm
+#| fig-cap: "Scatter plots and OLS regression lines for amount pledged versus campaign length"
+p1 = joined %>%
+  mutate(length = deadline - launched) %>%
+  ggplot(aes(x=length, y=pledged)) +
+  geom_jitter(alpha=.5, color=viridisLite::viridis(1)[1]) +
+  geom_smooth(formula = y ~ x, method='lm') + 
+  scale_y_continuous(labels=scales::dollar) +
+  ggtitle("Medium-length Campaigns Raise the Most Money") + 
+  labs(y="Amount pledged", x="Campaign Length in Days") + 
+  annotate("label", x=75, y=3.8*10^6, label="All pledge amounts")
+  
+p2 = joined %>%
+  mutate(length = deadline - launched) %>%
+  ggplot(aes(x=length, y=pledged)) +
+  geom_jitter(alpha=.5, color=viridisLite::viridis(2)[2]) +
+  geom_smooth(formula = y ~ x, method='lm') +
+  scale_y_continuous(limits = c(0, 10^5), labels=scales::dollar) + 
+  labs(y="Amount pledged", x="Campaign Length in Days") + 
+  annotate("label", x=75, y=80000, label="Pledges Under $100K")
+
+cowplot::plot_grid(p1, p2, ncol=1)
+```
+
+```{r, eval=F}
+joined %>%
+  filter(
+	  subcategory_id == 14,
+    country_id == 2,
+    outcome == 'successful'
+  ) %>%
+  select(backers) %>%
+  ggplot(aes(x=backers)) + 
+  geom_histogram()
+```
+
+
+
+Recommendations
+--------
+
+##### What is a realistic Kickstarter campaign goal the company should aim to raise?
+
+The recommended campaign goal for this company is the median of the campaign goals for all successful board game campaigns in the United States, which is **\$5,000**.
+
+##### How many backers will be needed to meet their goal?
+
+The recommended number of backers is the rounded median of the number of backers for all successful board game campaigns in the United States, which is **250**.
+
+##### How many backers can the company realistically expect?
+
+The number of backers the company can realistically expect is the rounded median number of backers for all board game campaigns (not just the successful one) in the United States, which is **100**.
